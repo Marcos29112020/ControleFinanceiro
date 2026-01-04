@@ -7,10 +7,10 @@
     <script type="module" src="https://pyscript.net/releases/2024.9.1/core.js"></script>
     <!-- Manifest para PWA -->
     <link rel="manifest" href="manifest.json">
-    <!-- Ícone (crie um placeholder ou baixe um) -->
-    <link rel="icon" href="icon.png" type="image/png">
+    <!-- Ícones -->
+    <link rel="icon" href="icon-192.png" type="image/png">
     <meta name="theme-color" content="#ffffff">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
 </head>
 <body>
     <h1>App Finanças Pessoais (Versão Web/Offline)</h1>
@@ -44,27 +44,36 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import asyncio
-import js  # Para interop com DOM
-from pyscript import Element, display
+from js import document
+from pyscript import display
 
-# Inicialize DB em memória (para offline; carrega de arquivo se possível)
+# Banco em memória
 conn = sqlite3.connect(':memory:')
 cursor = conn.cursor()
 
-# Porte tabelas do main.py (crie-as aqui)
-cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS transacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor REAL NOT NULL, categoria TEXT NOT NULL, descricao TEXT, data TEXT NOT NULL)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS orcamentos (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, categoria TEXT NOT NULL, limite REAL NOT NULL, mes_ano TEXT NOT NULL)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS investimentos (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, simbolo TEXT NOT NULL, quantidade REAL NOT NULL, custo_medio REAL NOT NULL)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS config_api (usuario_id INTEGER PRIMARY KEY, api_key TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL
+)''')
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS transacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    valor REAL NOT NULL,
+    categoria TEXT NOT NULL,
+    descricao TEXT,
+    data TEXT NOT NULL
+)''')
 conn.commit()
 
-# Porte funções principais do main.py (adapte hash para JS, pois bcrypt não está disponível; use SHA256 simples por agora)
+# Funções auxiliares
 async def hash_password(password):
-    encoder = js.TextEncoder.new()
+    encoder = document.defaultView.TextEncoder.new()
     data = encoder.encode(password)
-    digest = await js.crypto.subtle.digest("SHA-256", data)
-    hash_array = js.Uint8Array.new(digest)
+    digest = await document.defaultView.crypto.subtle.digest("SHA-256", data)
+    hash_array = document.defaultView.Uint8Array.new(digest)
     return ''.join(f'{byte:02x}' for byte in hash_array)
 
 async def cadastrar_usuario(username, password):
@@ -85,48 +94,52 @@ async def login(username, password):
             return result[0]
     return None
 
-# Outras funções: adicionar_transacao, listar_transacoes, etc. (porte o resto do main.py aqui, adaptando para async se necessário para JS interop)
-# Exemplo simplificado para adicionar transacao
 def adicionar_transacao(usuario_id, tipo, valor, categoria, descricao):
     data = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('INSERT INTO transacoes (usuario_id, tipo, valor, categoria, descricao, data) VALUES (?, ?, ?, ?, ?, ?)', (usuario_id, tipo, valor, categoria, descricao, data))
+    cursor.execute('INSERT INTO transacoes (usuario_id, tipo, valor, categoria, descricao, data) VALUES (?, ?, ?, ?, ?, ?)',
+                   (usuario_id, tipo, valor, categoria, descricao, data))
     conn.commit()
 
-# Função para mostrar output
 def show_output(text):
-    Element("output").write(text)
+    document.getElementById("output").innerText = text
 
-# Eventos de botões (interop)
-login_btn = Element("login-btn")
-login_btn.element.onclick = lambda e: asyncio.create_task(handle_login())
-
-cadastro_btn = Element("cadastro-btn")
-cadastro_btn.element.onclick = lambda e: asyncio.create_task(handle_cadastro())
-
-async def handle_login():
-    username = Element("username").value
-    password = Element("password").value
+# Handlers
+async def handle_login(event):
+    username = document.getElementById("username").value
+    password = document.getElementById("password").value
     usuario_id = await login(username, password)
     if usuario_id:
-        show_output("Login bem-sucedido! ID: " + str(usuario_id))
-        Element("login-form").element.style.display = "none"
-        Element("main-menu").element.style.display = "block"
-        # Aqui, adicione listeners para outros botões (ex: add-receita.onclick = ...)
+        show_output(f"Login bem-sucedido! ID: {usuario_id}")
+        document.getElementById("login-form").style.display = "none"
+        document.getElementById("main-menu").style.display = "block"
     else:
         show_output("Credenciais inválidas.")
 
-async def handle_cadastro():
-    username = Element("username").value
-    password = Element("password").value
+async def handle_cadastro(event):
+    username = document.getElementById("username").value
+    password = document.getElementById("password").value
     if await cadastrar_usuario(username, password):
         show_output("Usuário cadastrado com sucesso!")
     else:
         show_output("Erro ao cadastrar (usuário já existe?).")
 
-# Porte mais funções e botões conforme necessário; para gráficos, use plt e display(fig, target="output")
+def handle_relatorio(event):
+    df = pd.read_sql_query("SELECT tipo, valor, categoria, data FROM transacoes", conn)
+    if df.empty:
+        show_output("Nenhuma transação registrada.")
+        return
+    fig, ax = plt.subplots()
+    df.groupby("tipo")["valor"].sum().plot(kind="bar", ax=ax)
+    ax.set_title("Resumo por tipo de transação")
+    display(fig, target="output")
+
+# Conectar eventos
+document.getElementById("login-btn").addEventListener("click", lambda e: asyncio.create_task(handle_login(e)))
+document.getElementById("cadastro-btn").addEventListener("click", lambda e: asyncio.create_task(handle_cadastro(e)))
+document.getElementById("ver-relatorio").addEventListener("click", handle_relatorio)
     </py-script>
 
-    <!-- Service Worker para offline -->
+    <!-- Service Worker -->
     <script type="module">
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js');
