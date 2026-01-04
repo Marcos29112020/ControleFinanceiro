@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>App Finanças Pessoais</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.9.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.9.1/core.js"></script>
+    <!-- Manifest para PWA -->
+    <link rel="manifest" href="manifest.json">
+    <!-- Ícone (crie um placeholder ou baixe um) -->
+    <link rel="icon" href="icon.png" type="image/png">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+</head>
+<body>
+    <h1>App Finanças Pessoais (Versão Web/Offline)</h1>
+    <div id="login-form">
+        <label for="username">Usuário:</label>
+        <input id="username" placeholder="Nome de usuário">
+        <label for="password">Senha:</label>
+        <input id="password" type="password" placeholder="Senha">
+        <button id="login-btn">Login</button>
+        <button id="cadastro-btn">Cadastrar</button>
+    </div>
+    <div id="main-menu" style="display: none;">
+        <h2>Menu Principal</h2>
+        <button id="add-receita">Adicionar Receita</button>
+        <button id="add-despesa">Adicionar Despesa</button>
+        <button id="gerenciar-transacoes">Gerenciar Transações</button>
+        <button id="gerenciar-orcamentos">Gerenciar Orçamentos</button>
+        <button id="gerenciar-investimentos">Gerenciar Investimentos</button>
+        <button id="ver-relatorio">Ver Relatório</button>
+        <button id="sair">Sair</button>
+    </div>
+    <div id="output"></div>
+
+    <py-config>
+        packages = ["sqlite3", "pandas", "matplotlib", "requests"]
+    </py-config>
+
+    <py-script>
+import sqlite3
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+import asyncio
+import js  # Para interop com DOM
+from pyscript import Element, display
+
+# Inicialize DB em memória (para offline; carrega de arquivo se possível)
+conn = sqlite3.connect(':memory:')
+cursor = conn.cursor()
+
+# Porte tabelas do main.py (crie-as aqui)
+cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS transacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, tipo TEXT NOT NULL, valor REAL NOT NULL, categoria TEXT NOT NULL, descricao TEXT, data TEXT NOT NULL)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS orcamentos (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, categoria TEXT NOT NULL, limite REAL NOT NULL, mes_ano TEXT NOT NULL)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS investimentos (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER NOT NULL, simbolo TEXT NOT NULL, quantidade REAL NOT NULL, custo_medio REAL NOT NULL)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS config_api (usuario_id INTEGER PRIMARY KEY, api_key TEXT)''')
+conn.commit()
+
+# Porte funções principais do main.py (adapte hash para JS, pois bcrypt não está disponível; use SHA256 simples por agora)
+async def hash_password(password):
+    encoder = js.TextEncoder.new()
+    data = encoder.encode(password)
+    digest = await js.crypto.subtle.digest("SHA-256", data)
+    hash_array = js.Uint8Array.new(digest)
+    return ''.join(f'{byte:02x}' for byte in hash_array)
+
+async def cadastrar_usuario(username, password):
+    password_hash = await hash_password(password)
+    try:
+        cursor.execute('INSERT INTO usuarios (username, password_hash) VALUES (?, ?)', (username, password_hash))
+        conn.commit()
+        return True
+    except:
+        return False
+
+async def login(username, password):
+    cursor.execute('SELECT id, password_hash FROM usuarios WHERE username = ?', (username,))
+    result = cursor.fetchone()
+    if result:
+        input_hash = await hash_password(password)
+        if result[1] == input_hash:
+            return result[0]
+    return None
+
+# Outras funções: adicionar_transacao, listar_transacoes, etc. (porte o resto do main.py aqui, adaptando para async se necessário para JS interop)
+# Exemplo simplificado para adicionar transacao
+def adicionar_transacao(usuario_id, tipo, valor, categoria, descricao):
+    data = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('INSERT INTO transacoes (usuario_id, tipo, valor, categoria, descricao, data) VALUES (?, ?, ?, ?, ?, ?)', (usuario_id, tipo, valor, categoria, descricao, data))
+    conn.commit()
+
+# Função para mostrar output
+def show_output(text):
+    Element("output").write(text)
+
+# Eventos de botões (interop)
+login_btn = Element("login-btn")
+login_btn.element.onclick = lambda e: asyncio.create_task(handle_login())
+
+cadastro_btn = Element("cadastro-btn")
+cadastro_btn.element.onclick = lambda e: asyncio.create_task(handle_cadastro())
+
+async def handle_login():
+    username = Element("username").value
+    password = Element("password").value
+    usuario_id = await login(username, password)
+    if usuario_id:
+        show_output("Login bem-sucedido! ID: " + str(usuario_id))
+        Element("login-form").element.style.display = "none"
+        Element("main-menu").element.style.display = "block"
+        # Aqui, adicione listeners para outros botões (ex: add-receita.onclick = ...)
+    else:
+        show_output("Credenciais inválidas.")
+
+async def handle_cadastro():
+    username = Element("username").value
+    password = Element("password").value
+    if await cadastrar_usuario(username, password):
+        show_output("Usuário cadastrado com sucesso!")
+    else:
+        show_output("Erro ao cadastrar (usuário já existe?).")
+
+# Porte mais funções e botões conforme necessário; para gráficos, use plt e display(fig, target="output")
+    </py-script>
+
+    <!-- Service Worker para offline -->
+    <script type="module">
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
