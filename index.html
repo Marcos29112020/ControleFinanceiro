@@ -44,8 +44,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import asyncio
+from js import document, TextEncoder, crypto, Uint8Array
 from pyscript import Element, display
-from pyodide.ffi import create_proxy  # Importante para proxies em event listeners
+from pyodide.ffi import create_proxy
 
 # Banco em memória
 conn = sqlite3.connect(':memory:')
@@ -70,7 +71,6 @@ conn.commit()
 
 # Funções auxiliares
 async def hash_password(password):
-    from js import TextEncoder, crypto, Uint8Array
     encoder = TextEncoder.new()
     data = encoder.encode(password)
     digest = await crypto.subtle.digest("SHA-256", data)
@@ -136,17 +136,13 @@ def handle_relatorio(event):
 
 # Conectar eventos usando create_proxy para evitar destruição de proxy
 login_proxy = create_proxy(handle_login)
-Element("login-btn").element.addEventListener("click", login_proxy)
+document.getElementById("login-btn").addEventListener("click", login_proxy)
 
 cadastro_proxy = create_proxy(handle_cadastro)
-Element("cadastro-btn").element.addEventListener("click", cadastro_proxy)
+document.getElementById("cadastro-btn").addEventListener("click", cadastro_proxy)
 
 relatorio_proxy = create_proxy(handle_relatorio)
-Element("ver-relatorio").element.addEventListener("click", relatorio_proxy)
-
-# Para limpar proxies quando não necessários (opcional, para boa prática)
-# Ex: Element("login-btn").element.removeEventListener("click", login_proxy)
-# login_proxy.destroy()
+document.getElementById("ver-relatorio").addEventListener("click", relatorio_proxy)
     </py-script>
 
     <!-- Service Worker -->
